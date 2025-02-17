@@ -61,7 +61,7 @@ def run_bayesian_logistic_model():
         likelihood = pm.Beta('y_obs', alpha=mu * 10, beta=(1 - mu) * 10, observed=y_shared)
 
         # Sampling
-        trace = pm.sample(2000, tune=1000, cores=4, target_accept=0.95)
+        trace = pm.sample(100000, tune=2000, cores=4, target_accept=0.99)
 
     # Posterior analysis
     print(az.summary(trace))
