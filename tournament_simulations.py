@@ -31,7 +31,7 @@ pd.set_option('display.max_rows', None)
 pd.set_option('display.max_columns', None)
 # Load team strengths
 tournament_df = pd.read_csv(
-    "C:/Users/ASUS/OneDrive/Desktop/NCAA_Project/NCAA_march_madness/predicted_barthag_2024.csv")
+    "predicted_barthag_2024.csv")
 
 # Define tournament bracket (64 teams, ordered)
 # 68 teams in the tournament
@@ -127,7 +127,7 @@ tournament_df = tournament_df.merge(seed_region_df, on="team_names", how="left")
 tournament_df = tournament_df.set_index('team_names').loc[teams].reset_index()
 
 # Load past seed advancement probabilities
-past_results = pd.read_csv("C:/Users/ASUS/OneDrive/Desktop/NCAA_Project/NCAA_march_madness/past_tournament_rounds.csv")
+past_results = pd.read_csv("past_tournament_rounds.csv")
 round_columns = past_results.columns[1:]  # All columns except 'Seed'
 # Create a copy of the original data (to reference unmodified values)
 original_values = past_results[round_columns].copy()
