@@ -33,7 +33,7 @@ pd.set_option('display.max_rows', None)
 pd.set_option('display.max_columns', None)
 # Load team strengths
 tournament_df = pd.read_csv(
-    "C:/Users/ASUS/OneDrive/Desktop/Python/NCAA_Project/NCAA_march_madness/predicted_barthag_2024.csv")
+    "C:/Users/ASUS/OneDrive/Desktop/NCAA_Project/NCAA_march_madness/predicted_barthag_2024.csv")
 
 # Define tournament bracket (64 teams, ordered)
 # 68 teams in the tournament
@@ -47,10 +47,10 @@ teams = [ "Connecticut", "Stetson", "Northwestern", "Florida Atlantic", "San Die
             "Gonzaga", "McNeese St.", "Kansas", "Samford", "Oregon", "South Carolina", "Creighton", "Akron", "Texas",
             "Colorado St.", "Virginia", "Tennessee", "Saint Peter's"]
 # Filter strengths_df to only include teams in the list
-tournament_df = tournament_df[tournament_df['TEAM'].isin(teams)]
+tournament_df = tournament_df[tournament_df['team'].isin(teams)]
 
 # Ensure the column name matches your dataset
-tournament_df.rename(columns={'TEAM': 'team_names'}, inplace=True)
+tournament_df.rename(columns={'team': 'team_names'}, inplace=True)
 # sets the seeds and regions of each team
 seed_region_mapping = { "Connecticut": (1, "East"),
                         "Stetson": (16, "East"),
@@ -129,7 +129,7 @@ tournament_df = tournament_df.merge(seed_region_df, on="team_names", how="left")
 tournament_df = tournament_df.set_index('team_names').loc[teams].reset_index()
 
 # Load past seed advancement probabilities
-past_results = pd.read_csv("C:/Users/ASUS/OneDrive/Desktop/Python/NCAA_Project/NCAA_march_madness/past_tournament_rounds.csv")
+past_results = pd.read_csv("C:/Users/ASUS/OneDrive/Desktop/NCAA_Project/NCAA_march_madness/past_tournament_rounds.csv")
 round_columns = past_results.columns[1:]  # All columns except 'Seed'
 # Create a copy of the original data (to reference unmodified values)
 original_values = past_results[round_columns].copy()
@@ -159,12 +159,10 @@ def simulate_game(team1, team2, mean1, mean2, std1, std2, seed1_prob, seed2_prob
 def simulate_first_four():
     global tournament_df
     first_four_winners = []
+    losers = []
 
     # Group the DataFrame by 'Region' and 'Seed'
     grouped = tournament_df.groupby(['Region', 'Seed'])
-
-    # Initialize a list to keep track of losers
-    losers = []
 
     # Iterate through each group (Region, Seed)
     for (region, seed), group in grouped:
@@ -173,48 +171,28 @@ def simulate_first_four():
             team1, team2 = group.iloc[0], group.iloc[1]
 
             # Extract mean and std for each team from tournament_df
-            mean1, std1 = team1['Predicted_BARTHAG_Mean'], team1['Predicted_BARTHAG_Std']
-            mean2, std2 = team2['Predicted_BARTHAG_Mean'], team2['Predicted_BARTHAG_Std']
+            mean1, std1 = team1['Predicted_barthag_Mean'], team1['Predicted_barthag_Std']
+            mean2, std2 = team2['Predicted_barthag_Mean'], team2['Predicted_barthag_Std']
 
-            # Display the first four matchups
-            st.write(f"### {team1['team_names']} ({team1['Seed']}) vs {team2['team_names']} ({team2['Seed']})")
-
-            # Allow the user to select or simulate the winner
-            option = st.radio(
-                "Select or simulate the winner",
-                ["Select Winner", "Simulate Game"],
-                key=f"{team1['team_names']}_{team2['team_names']}__{st.session_state.simulation_num}"
+            # Simulate the game
+            simulated_winner = simulate_game(
+                team1['team_names'], team2['team_names'],
+                mean1, mean2, std1, std2,
+                0, 0  # Default probabilities for seed (not used for simulation)
             )
 
-            if option == "Simulate Game":
-                # Simulate the game
-                simulated_winner = simulate_game(
-                    team1['team_names'], team2['team_names'],
-                    mean1, mean2, std1, std2,
-                    0, 0  # Default probabilities for seed (not used for simulation)
-                )
-                loser = team1['team_names'] if simulated_winner != team1['team_names'] else team2['team_names']
-                losers.append(loser)
-                st.write(f"Simulated winner: {simulated_winner}")
-                first_four_winners.append(simulated_winner)
-            elif option == "Select Winner":
-                # Allow user to manually select the winner
-                winner = st.radio(
-                    f"Choose the winner between {team1['team_names']} and {team2['team_names']}",
-                    options=[f"{team1['team_names']}", f"{team2['team_names']}"],
-                    key=f"winner_{team1['team_names']}_{team2['team_names']}_{st.session_state.simulation_num}"
-                )
-                if winner:
-                    first_four_winners.append(winner)
-                    # Determine the loser
-                loser = team1['team_names'] if winner != team1['team_names'] else team2['team_names']
-                losers.append(loser)
+            loser = team1['team_names'] if simulated_winner != team1['team_names'] else team2['team_names']
+            losers.append(loser)
+            first_four_winners.append(simulated_winner)
 
-        # Remove the losers from the DataFrame (those teams should not appear further)
-        tournament_df = tournament_df[~tournament_df['team_names'].isin(losers)]
+            # Print the results
+            st.write(f"### {team1['team_names']} ({team1['Seed']}) vs {team2['team_names']} ({team2['Seed']}) → Winner: {simulated_winner}")
 
-    # Return the winners of the First Four games and the modified tournament DataFrame
+    # Remove the losers from the DataFrame
+    tournament_df = tournament_df[~tournament_df['team_names'].isin(losers)]
+
     return first_four_winners
+
 
 def simulate_tournament():
     reset_session_state() # to avoid duplicate widget keys when simulating again
@@ -232,10 +210,6 @@ def simulate_tournament():
 
     st.write("### First Four Matchups")
     first_four_winners = simulate_first_four()  # Get winners from the first four games
-
-    if not first_four_winners:
-        st.write("Please select winners for the First Four matchups or simulate them.")
-        return
 
     current_round_teams = [team for team in tournament_df['team_names']]
 
@@ -258,8 +232,8 @@ def simulate_tournament():
             team1 = tournament_df[tournament_df['team_names'] == team1_name].iloc[0]
             team2 = tournament_df[tournament_df['team_names'] == team2_name].iloc[0]
 
-            mean1, std1 = team1['Predicted_BARTHAG_Mean'], team1['Predicted_BARTHAG_Std']
-            mean2, std2 = team2['Predicted_BARTHAG_Mean'], team2['Predicted_BARTHAG_Std']
+            mean1, std1 = team1['Predicted_barthag_Mean'], team1['Predicted_barthag_Std']
+            mean2, std2 = team2['Predicted_barthag_Mean'], team2['Predicted_barthag_Std']
 
             seed1_prob = past_results[past_results['Seed'] == team1['Seed']].iloc[0][
                 past_results.columns[round_idx]]
@@ -294,6 +268,31 @@ def simulate_tournament():
         st.session_state.tournament_simulated = True
 
     return round_matchups, current_round_teams[0], winner
+
+def reset_simulation():
+    if 'selected_winners' in st.session_state:
+        st.session_state.selected_winners.clear()  # Reset selected winners
+
+    if 'round_matchups' in st.session_state:
+        st.session_state.round_matchups.clear()  # Reset round matchups
+
+    if 'current_round_teams' in st.session_state:
+        st.session_state.current_round_teams.clear()  # Reset teams for the next simulation
+
+    if 'tournament_simulated' in st.session_state:
+        st.session_state.tournament_simulated = False  # Reset simulation status
+
+    # Ensure that radio buttons' state is reset too by clearing related session state
+    if 'radio_button_state' in st.session_state:
+        del st.session_state['radio_button_state']  # Remove the stored radio button values to reset widgets
+        # Reset simulation number
+        st.session_state.simulation_num = 1
+
+# Add a button to simulate a new tournament
+if st.button('Simulate New Tournament'):
+    reset_simulation() # Reset the flag to trigger a new simulation
+    st.session_state.simulation_num += 1
+    simulate_tournament()
 
 simulated_tournament = simulate_tournament()
 # Assuming simulated_tournament contains round_matchups
@@ -331,30 +330,4 @@ for round_name, matchups in round_matchups.items():
 
         #st.write(f"Winner of {team1_name} vs {team2_name}: {winner}")
 
-# Run the tournament only once and store it in session state
-if 'tournament_simulated' not in st.session_state or not st.session_state.tournament_simulated:
-    simulated_tournament = simulate_tournament()
 
-def reset_simulation():
-    if 'selected_winners' in st.session_state:
-        st.session_state.selected_winners.clear()  # Reset selected winners
-
-    if 'round_matchups' in st.session_state:
-        st.session_state.round_matchups.clear()  # Reset round matchups
-
-    if 'current_round_teams' in st.session_state:
-        st.session_state.current_round_teams.clear()  # Reset teams for the next simulation
-
-    if 'tournament_simulated' in st.session_state:
-        st.session_state.tournament_simulated = False  # Reset simulation status
-
-    # Ensure that radio buttons' state is reset too by clearing related session state
-    if 'radio_button_state' in st.session_state:
-        del st.session_state['radio_button_state']  # Remove the stored radio button values to reset widgets
-
-
-# Add a button to simulate a new tournament
-if st.button('Simulate New Tournament'):
-    reset_simulation() # Reset the flag to trigger a new simulation
-    st.session_state.simulation_num += 1
-    simulate_tournament()

@@ -9,42 +9,33 @@ from scipy.special import expit  # Sigmoid function
 # Download latest version
 path = kagglehub.dataset_download("andrewsundberg/college-basketball-dataset")
 
-# File paths
-file_path = f"C:/Users/ASUS/.cache/kagglehub/datasets/andrewsundberg/college-basketball-dataset/versions/7/cbb.csv"
-file_path_new = f"C:/Users/ASUS/.cache/kagglehub/datasets/andrewsundberg/college-basketball-dataset/versions/7/cbb24.csv"
-
 # Set display options
 pd.set_option('display.max_columns', None)
 
 # Load datasets
-df = pd.read_csv(file_path)  # Original data
-df_new = pd.read_csv(file_path_new)  # 2024 season up to 3/18/2024
-print(df_new)
-# Sort data by BARTHAG (Power Rating)
-df_sorted = df.sort_values(by='BARTHAG', ascending=False)
+men_df = pd.read_csv(f"C:/Users/ASUS/OneDrive/Desktop/Python/NCAA_Project/NCAA_march_madness/mbb_past_results.csv")
+men_df_new = pd.read_csv(f"C:/Users/ASUS/OneDrive/Desktop/Python/NCAA_Project/NCAA_march_madness/mbb_25.csv")
 
-# Filter for top-performing teams
-df_champs = df[df['POSTSEASON'].isin(['Champions', '2ND', 'F4'])]
+women_df = pd.read_csv(f"C:/Users/ASUS/OneDrive/Desktop/Python/NCAA_Project/NCAA_march_madness/wbb_past_results.csv")
+women_df_new = pd.read_csv(f"C:/Users/ASUS/OneDrive/Desktop/Python/NCAA_Project/NCAA_march_madness/wbb_25.csv")
 
-# Filter lower-seeded teams with high BARTHAG
-df_low_seeds = df[df["SEED"] >= 8].sort_values(by="BARTHAG", ascending=False)
-
-
+# Remove the Ivy League teams that didn't play in 2020-21 season due to COVID
+women_df = women_df[women_df["games"] != 0]
 # Bayesian Logistic Regression Model
-def run_bayesian_logistic_model():
-    df['win_percentage'] = df["W"] / df["G"]
+def run_bayesian_logistic_model(df, df_new, file_path):
+    df['win_percentage'] = df["wins"] / df["games"]
 
     # Convert categorical conference variable into dummy variables
-    df_dummies = pd.get_dummies(df, columns=['CONF'], drop_first=True)
-    df_new_dummies = pd.get_dummies(df_new, columns=['CONF'], drop_first=True)
-
+    df_dummies = pd.get_dummies(df, columns=['conf'], drop_first=True)
+    df_new_dummies = pd.get_dummies(df_new, columns=['conf'], drop_first=True)
     # Define predictor and target variables
-    x = df_dummies.drop(columns=['BARTHAG', 'POSTSEASON', 'SEED', "TEAM", "W", "G"])
-    y = df_dummies['BARTHAG']
+    x = df_dummies.drop(columns=['barthag', "team", "wins", "games","def_ft_pct"])
+    y = df_dummies['barthag']
 
     # Standardize predictors
     scaler_x = StandardScaler()
     x_scaled = scaler_x.fit_transform(x)
+    #print(pd.DataFrame(x_scaled).isna().sum())
 
     with pm.Model() as model:
         # Prior distributions
@@ -61,7 +52,7 @@ def run_bayesian_logistic_model():
         likelihood = pm.Beta('y_obs', alpha=mu * 10, beta=(1 - mu) * 10, observed=y_shared)
 
         # Sampling
-        trace = pm.sample(100000, tune=2000, cores=4, target_accept=0.99)
+        trace = pm.sample(10000, tune=2000, cores=4, target_accept=0.99)
 
     # Posterior analysis
     print(az.summary(trace))
@@ -73,7 +64,7 @@ def run_bayesian_logistic_model():
     print(az.rhat(trace))
 
     # Prepare new data for prediction
-    columns_to_drop = ['BARTHAG', 'POSTSEASON', 'SEED', 'TEAM', 'W', 'G']
+    columns_to_drop = ['barthag', 'team', 'wins', 'games',"def_ft_pct"]
     columns_to_drop = [col for col in columns_to_drop if col in df_new_dummies.columns]
     x_new = df_new_dummies.drop(columns=columns_to_drop)
 
@@ -94,14 +85,17 @@ def run_bayesian_logistic_model():
 
     # Save predictions to CSV
     predictions = pd.DataFrame({
-        'TEAM': df_new['TEAM'],
+        'team': df_new['team'],
         'Predicted_BARTHAG_Mean': y_pred_mean,
         'Predicted_BARTHAG_Std': y_pred_std
     })
+    # Adjust the predicted standard deviation based on the number of games played
+    predictions['Adjusted_Std_Dev'] = predictions['Predicted_BARTHAG_Std'] / np.sqrt(men_df_new['games'])
 
-    predictions.to_csv("predicted_barthag_2024.csv", index=False)
-    print("\nPredicted team strengths saved to 'predicted_barthag_2024.csv'.")
+    predictions.to_csv(file_path, index=False)
+    print("\nPredicted team strengths saved to file.")
 
 
 if __name__ == '__main__':
-    run_bayesian_logistic_model()
+    #run_bayesian_logistic_model(men_df, men_df_new, "predicted_barthag_men.csv")
+    run_bayesian_logistic_model(women_df, women_df_new, "predicted_barthag_women.csv")
