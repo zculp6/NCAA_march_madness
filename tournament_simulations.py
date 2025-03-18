@@ -405,6 +405,7 @@ for round_name, matchups in round_matchups.items():
             new_winner = winner
             old_winner = selected_winner
             update_future_rounds(new_winner, old_winner, round_name)
+            st.rerun()
         round_winners.append(winner)
 
         # Store winners persistently for this round
