@@ -4,8 +4,7 @@ import streamlit as st
 
 # Streamlit app layout
 st.title('NCAA Tournament Simulation with Interactive Bracket')
-# Add a small note
-st.markdown("<small style='color:gray;'>*Minor Bugs with Changing Results: must press the button twice*</small>", unsafe_allow_html=True)
+
 # Initialize session state for the tournament simulation if it doesn't exist
 if 'round_matchups' not in st.session_state:
     st.session_state.round_matchups = {}
@@ -76,6 +75,24 @@ seed_region_mapping = {
     "Michigan St.": (2, "South"),
     "Bryant": (15, "South"),
 
+# West Region
+    "Florida": (1, "West"),
+    "Norfolk St.": (16, "West"),
+    "Connecticut": (8, "West"),
+    "Oklahoma": (9, "West"),
+    "Memphis": (5, "West"),
+    "Colorado St.": (12, "West"),
+    "Maryland": (4, "West"),
+    "Grand Canyon": (13, "West"),
+    "Missouri": (6, "West"),
+    "Drake": (11, "West"),
+    "Texas Tech": (3, "West"),
+    "UNC Wilmington": (14, "West"),
+    "Kansas": (7, "West"),
+    "Arkansas": (10, "West"),
+    "St. John's": (2, "West"),
+    "Nebraska Omaha": (15, "West"),
+
     # East Region
     "Duke": (1, "East"),
     "American": (16, "East"),
@@ -114,23 +131,6 @@ seed_region_mapping = {
     "Tennessee": (2, "Midwest"),
     "Wofford": (15, "Midwest"),
 
-    # West Region
-    "Florida": (1, "West"),
-    "Norfolk St.": (16, "West"),
-    "Connecticut": (8, "West"),
-    "Oklahoma": (9, "West"),
-    "Memphis": (5, "West"),
-    "Colorado St.": (12, "West"),
-    "Maryland": (4, "West"),
-    "Grand Canyon": (13, "West"),
-    "Missouri": (6, "West"),
-    "Drake": (11, "West"),
-    "Texas Tech": (3, "West"),
-    "UNC Wilmington": (14, "West"),
-    "Kansas": (7, "West"),
-    "Arkansas": (10, "West"),
-    "St. John's": (2, "West"),
-    "Nebraska Omaha": (15, "West"),
 }
 
 seed_region_df = pd.DataFrame.from_dict(seed_region_mapping, orient='index', columns=['Seed', 'Region']).reset_index()
@@ -169,7 +169,7 @@ tournament_df = tournament_df.merge(past_results, on="Seed", how="left")
 
 # Simulate a game
 def simulate_game(team1, team2, mean1, mean2, std1, std2, seed1_prob, seed2_prob):
-    weight = 0.95
+    weight = 0.9
     team1_strength = weight * np.random.normal(mean1, std1) + (1 - weight) * seed1_prob
     team2_strength = weight * np.random.normal(mean2, std2) + (1 - weight) * seed2_prob
     return team1 if team1_strength > team2_strength else team2
@@ -279,10 +279,6 @@ def simulate_tournament():
 
     return round_matchups, current_round_teams[0], simulated_winner
 
-
-import streamlit as st
-
-
 def reset_simulation():
     if 'selected_winners' in st.session_state:
         st.session_state.selected_winners.clear()
@@ -296,11 +292,28 @@ def reset_simulation():
     if 'tournament_simulated' in st.session_state:
         st.session_state.tournament_simulated = False
 
-    if 'radio_button_state' in st.session_state:
-        del st.session_state['radio_button_state']
+    #if 'radio_button_state' in st.session_state:
+    #    del st.session_state['radio_button_state']
 
     st.session_state.simulation_num = 1  # Reset simulation counter
 
+# Add button to show power ranking
+if st.button('Show Power Ranking'):
+    # Sort the DataFrame by Predicted_BARTHAG_Mean * 100 (to get a strength ranking)
+    tournament_df['Power Index'] = tournament_df['Predicted_BARTHAG_Mean'] * 100
+
+    # Sort the DataFrame by 'Strength' in descending order to show the strongest teams first
+    power_ranking = tournament_df.sort_values(by='Power Index', ascending=False)
+
+    # Reset index to show rankings (top team is rank 1, worst team is rank 68)
+    power_ranking.reset_index(drop=True, inplace=True)  # Reset index to default (starting from 0)
+    power_ranking.index = power_ranking.index + 1  # Shift index to start from 1 instead of 0
+
+    # Display the power ranking
+    st.write("### Power Ranking of Teams (Based on Predicted Power Index)")
+    st.markdown("<small style='color:gray;'>*Power Index Out of 100*</small>",
+                unsafe_allow_html=True)
+    st.dataframe(power_ranking[['team_names', 'Power Index', "Seed"]])  # Displaying only the Team and Strength columns
 
 # Button to simulate a new tournament
 if st.button('Simulate New Tournament'):
@@ -318,13 +331,54 @@ if st.session_state.tournament_simulated or 'round_matchups' not in st.session_s
 if 'selected_winners' not in st.session_state:
     st.session_state.selected_winners = {}
 
+# Track if any selection has changed
+selection_changed = False
+
 # Retrieve stored matchups
 round_matchups = st.session_state.round_matchups
+
+
+# Function to propagate winners to all future rounds
+def update_future_rounds(new_winner, old_winner, changed_round_name):
+    round_keys = list(st.session_state.round_matchups.keys())
+
+    # Initialize a dictionary to store winners for each round
+    round_winners = {round_name: st.session_state.selected_winners.get(round_name, []) for round_name in round_keys}
+
+    # Find the index of the round where the change occurred
+    changed_round_index = round_keys.index(changed_round_name)
+
+    # Loop over all rounds after the changed round
+    for i in range(changed_round_index, len(round_keys)):
+        current_round = round_keys[i]
+
+        # Get winners from the current round
+        current_winners = round_winners[current_round]
+
+        # Replace the old winner with the new winner in the current round
+        updated_winners = [new_winner if winner == old_winner else winner for winner in current_winners]
+
+        # Create matchups for the next round based on updated winners
+        if i + 1 < len(round_keys):
+            next_round = round_keys[i + 1]
+            next_round_matchups = []
+            for j in range(0, len(updated_winners), 2):
+                if j + 1 < len(updated_winners):
+                    next_round_matchups.append((updated_winners[j], updated_winners[j + 1], updated_winners[j]))
+
+            # Store the matchups for the next round
+            st.session_state.round_matchups[next_round] = next_round_matchups
+            # Update the winners for the next round
+            st.session_state.selected_winners[next_round] = updated_winners
 
 # Extract winners (track dynamic selections)
 for round_name, matchups in round_matchups.items():
     st.write(f"### {round_name}")
-    st.session_state.selected_winners[round_name] = []  # Store winners dynamically
+
+    if round_name not in st.session_state.selected_winners:
+        st.session_state.selected_winners[round_name] = []  # Store winners dynamically
+
+    round_winners = []
 
     for i, matchup in enumerate(matchups):
         team1_name, team2_name, simulated_winner = matchup
@@ -342,36 +396,17 @@ for round_name, matchups in round_matchups.items():
             key=f"{round_name}_{i}_{st.session_state.simulation_num}",
             index=0 if selected_winner == team1_name else 1
         )
+        key = f"{round_name}_{i}"
+        new_winner = None
+        # Store selection persistently
+        if winner != selected_winner:
+            st.session_state.selected_winners[key] = winner
+            selection_changed = True  # Flag that a change occurred
+            new_winner = winner
+            old_winner = selected_winner
+            update_future_rounds(new_winner, old_winner, round_name)
+        round_winners.append(winner)
 
-        # Immediately update the winner in session state upon selection
-        st.session_state.selected_winners[f"{round_name}_{i}"] = winner
-        st.session_state.selected_winners[round_name].append(winner)
+        # Store winners persistently for this round
+    st.session_state.selected_winners[round_name] = round_winners
 
-
-# Function to propagate winners to all future rounds
-def update_future_rounds():
-    round_keys = list(st.session_state.round_matchups.keys())
-
-    # Initialize a dictionary to store winners for each round
-    round_winners = {round_name: st.session_state.selected_winners.get(round_name, []) for round_name in round_keys}
-
-    # Iterate through all rounds to dynamically update matchups
-    for i in range(len(round_keys) - 1):  # Loop over all rounds except the last one
-        current_round = round_keys[i]
-        next_round = round_keys[i + 1]
-
-        # Get winners from the current round
-        current_winners = round_winners[current_round]
-
-        # Create matchups for the next round based on winners of the current round
-        next_round_matchups = []
-        for j in range(0, len(current_winners), 2):
-            if j + 1 < len(current_winners):
-                next_round_matchups.append((current_winners[j], current_winners[j + 1], None))  # No predefined winner
-
-        # Store the matchups for the next round
-        st.session_state.round_matchups[next_round] = next_round_matchups
-
-
-# After user selections, update all future rounds dynamically
-update_future_rounds()
