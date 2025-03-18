@@ -32,7 +32,7 @@ pd.set_option('display.max_rows', None)
 pd.set_option('display.max_columns', None)
 # Load team strengths
 tournament_df = pd.read_csv(
-    "predicted_barthag_men.csv")
+    "predicted_barthag_2025.csv")
 
 # Define tournament bracket (64 teams, ordered)
 # 68 teams in the tournament
@@ -167,11 +167,13 @@ past_results.drop(index=[16,17,18], inplace=True)
 # Merge probabilities into the tournament dataframe
 tournament_df = tournament_df.merge(past_results, on="Seed", how="left")
 
+# Add a slider to choose weight for simulation
+weight = st.slider("Choose Weight for Simulation (0 = less random, 1 = more random", min_value=0.0, max_value=1.0, value=0.5, step=0.05)
+
 # Simulate a game
-def simulate_game(team1, team2, mean1, mean2, std1, std2, seed1_prob, seed2_prob):
-    weight = 0.9
-    team1_strength = weight * np.random.normal(mean1, std1) + (1 - weight) * seed1_prob
-    team2_strength = weight * np.random.normal(mean2, std2) + (1 - weight) * seed2_prob
+def simulate_game(team1, team2, mean1, mean2, std1, std2, seed1_prob, seed2_prob, weight):
+    team1_strength = weight * np.random.normal(mean1, 8*std1) + (1 - weight) * seed1_prob
+    team2_strength = weight * np.random.normal(mean2, 8*std2) + (1 - weight) * seed2_prob
     return team1 if team1_strength > team2_strength else team2
 
 
@@ -197,7 +199,7 @@ def simulate_first_four():
             simulated_winner = simulate_game(
                 team1['team_names'], team2['team_names'],
                 mean1, mean2, std1, std2,
-                0, 0  # Default probabilities for seed (not used for simulation)
+                0, 0, weight  # Default probabilities for seed (not used for simulation)
             )
 
             loser = team1['team_names'] if simulated_winner != team1['team_names'] else team2['team_names']
@@ -259,7 +261,7 @@ def simulate_tournament():
             seed2_prob = past_results[past_results['Seed'] == team2['Seed']].iloc[0][
                 past_results.columns[round_idx]]
 
-            simulated_winner = simulate_game(team1_name, team2_name, mean1, mean2, std1, std2, seed1_prob, seed2_prob)
+            simulated_winner = simulate_game(team1_name, team2_name, mean1, mean2, std1, std2, seed1_prob, seed2_prob, weight)
 
             seed1 = team1["Seed"]
             seed2 = team2["Seed"]

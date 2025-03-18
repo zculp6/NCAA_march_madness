@@ -4,6 +4,19 @@ cbbdata::cbd_login()
 cbb_25 <- cbbdata::cbd_torvik_team_factors(year=2025, no_bias = T)
 write.csv(cbb_25, "cbb_25.csv", row.names=FALSE)
 
+combined_data <- data.frame()
+# Loop through each year and combine the datasets
+for (i in 2009:2024) {
+  cbb <- cbbdata::cbd_torvik_team_factors(year = i, no_bias = TRUE)
+  
+  # Add a new column to indicate the year (optional but useful)
+  cbb$year <- i
+  
+  # Combine the data by adding the current year's data to the combined_data dataframe
+  combined_data <- rbind(combined_data, cbb)
+}
+write.csv(combined_data, "cbb_past_results.csv", row.names=FALSE)
+
 install.packages("RSelenium")
 library(RSelenium)
 
