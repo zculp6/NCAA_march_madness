@@ -32,7 +32,7 @@ pd.set_option('display.max_rows', None)
 pd.set_option('display.max_columns', None)
 # Load team strengths
 tournament_df = pd.read_csv(
-    "predicted_barthag_2025.csv")
+    "team_strengths_2025.csv")
 
 # Define tournament bracket (64 teams, ordered)
 # 68 teams in the tournament
@@ -168,12 +168,12 @@ past_results.drop(index=[16,17,18], inplace=True)
 tournament_df = tournament_df.merge(past_results, on="Seed", how="left")
 
 # Add a slider to choose weight for simulation
-weight = st.slider("Choose Weight for Simulation (0 = less random, 1 = more random", min_value=0.0, max_value=1.0, value=0.5, step=0.05)
+weight = st.slider("Choose Weight for Simulation (0 = more chalky, 1 = less chalky)", min_value=0.0, max_value=1.0, value=1.0, step=0.05)
 
 # Simulate a game
 def simulate_game(team1, team2, mean1, mean2, std1, std2, seed1_prob, seed2_prob, weight):
-    team1_strength = weight * np.random.normal(mean1, 8*std1) + (1 - weight) * seed1_prob
-    team2_strength = weight * np.random.normal(mean2, 8*std2) + (1 - weight) * seed2_prob
+    team1_strength = weight * min(np.random.normal(mean1, std1),1) + (1 - weight) * seed1_prob
+    team2_strength = weight * min(np.random.normal(mean2, std2),1) + (1 - weight) * seed2_prob
     return team1 if team1_strength > team2_strength else team2
 
 
@@ -192,8 +192,8 @@ def simulate_first_four():
             team1, team2 = group.iloc[0], group.iloc[1]
 
             # Extract mean and std for each team from tournament_df
-            mean1, std1 = team1['Predicted_BARTHAG_Mean'], team1['Predicted_BARTHAG_Std']
-            mean2, std2 = team2['Predicted_BARTHAG_Mean'], team2['Predicted_BARTHAG_Std']
+            mean1, std1 = team1['strength'], team1['error']
+            mean2, std2 = team2['strength'], team2['error']
 
             # Simulate the game
             simulated_winner = simulate_game(
@@ -253,8 +253,8 @@ def simulate_tournament():
             team1 = tournament_df[tournament_df['team_names'] == team1_name].iloc[0]
             team2 = tournament_df[tournament_df['team_names'] == team2_name].iloc[0]
 
-            mean1, std1 = team1['Predicted_BARTHAG_Mean'], team1['Predicted_BARTHAG_Std']
-            mean2, std2 = team2['Predicted_BARTHAG_Mean'], team2['Predicted_BARTHAG_Std']
+            mean1, std1 = team1['strength'], team1['error']
+            mean2, std2 = team2['strength'], team2['error']
 
             seed1_prob = past_results[past_results['Seed'] == team1['Seed']].iloc[0][
                 past_results.columns[round_idx]]
@@ -302,7 +302,7 @@ def reset_simulation():
 # Add button to show power ranking
 if st.button('Show Power Ranking'):
     # Sort the DataFrame by Predicted_BARTHAG_Mean * 100 (to get a strength ranking)
-    tournament_df['Power Index'] = tournament_df['Predicted_BARTHAG_Mean'] * 100
+    tournament_df['Power Index'] = tournament_df['strength'] * 100
 
     # Sort the DataFrame by 'Strength' in descending order to show the strongest teams first
     power_ranking = tournament_df.sort_values(by='Power Index', ascending=False)

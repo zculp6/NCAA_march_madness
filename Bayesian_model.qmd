@@ -1,0 +1,342 @@
+---
+title: "Bayesian March Madness"
+author: "Zach Culp"
+format: html
+editor: visual
+---
+
+## Model
+
+```{r}
+library(brms)
+library(dplyr)
+library(stringr)
+library(rstan)
+library(cmdstanr)
+
+game_stats <- read.csv("MRegularSeasonDetailedResults.csv")
+teams <- read.csv("MTeams.csv")
+season_stats <- read.csv("mbb_25.csv")  # 2025 season
+past_season <- read.csv("cbb_past_results.csv")  # Historical seasons
+
+
+# 1. Combine historical and current season stats
+all_season_stats <- bind_rows(past_season, season_stats)
+
+# 2. Manual team name corrections
+team_name_map <- c(
+  "Abilene Christian" = "Abilene Chr",
+  "American" = "American Univ",
+  "Little Rock" = "Ark Little Rock",
+  "Arkansas Pine Bluff" = "Ark Pine Bluff",
+  "Bethune Cookman" = "Bethune-Cookman",
+  "Boston University" = "Boston Univ",
+  "Central Michigan" = "C Michigan",
+  "Central Arkansas" = "Cent Arkansas",
+  "Central Connecticut" = "Central Conn",
+  "Charleston Southern" = "Charleston So",
+  "The Citadel" = "Citadel",
+  "Coastal Carolina" = "Coastal Car",
+  "Charleston" = "Col Charleston",
+  "Cal St. Bakersfield" = "CS Bakersfield",
+  "Cal St. Fullerton" = "CS Fullerton",
+  "Cal St. Northridge" = "CS Northridge",
+  "Detroit Mercy" = "Detroit",
+  "Eastern Illinois" = "E Illinois",
+  "Eastern Kentucky" = "E Kentucky",
+  "Eastern Michigan" = "E Michigan",
+  "Eastern Washington" = "E Washington",
+  "East Tennessee St." = "ETSU",
+  "Fairleigh Dickinson" = "F Dickinson",
+  "Florida Atlantic" = "Fl Atlantic",
+  "Florida Gulf Coast" = "FGCU",
+  "FIU" = "Florida Intl",
+  "Grambling St." = "Grambling",
+  "G Washington", "George Washington",
+  "Georgia Southern" = "Ga Southern",
+  "Houston Christian" = "Houston Chr",
+  "Illinois Chicago" = "IL Chicago",
+  "IU Indy" = "IUPUI",
+  "Kennesaw St." = "Kennesaw",
+  "Kent St." = "Kent",
+  "LIU" = "LIU Brooklyn",
+  "Lousiana Monroe" = "Louisiana",
+  "Loyola Chicago" = "Loyola-Chicago",
+  "Loyola Marymount" = "Loy Marymount",
+  "Maryland Eastern Shore" = "MD E Shore",
+  "Middle Tennessee" = "MTSU",
+  "Milwaukee" = "WI Milwaukee",
+  "Mississippi Valley St." = "MS Valley St",
+  "Monmouth" = "Monmouth NJ",
+  "Mount St. Mary's" = "Mt St Mary's",
+  "Nebraska Omaha" = "NE Omaha",
+  "North Carolina A&T" = "NC A&T",
+  "North Carolina Central" = "NC Central",
+  "Northern Illinois" = "N Illinois",
+  "Northern Kentucky" = "N Kentucky",
+  "North Dakota St." = "N Dakota St",
+  "Northwestern St." = "Northwestern LA",
+  "Prairie View A&M" = "Prairie View",
+  "Purdue Fort Wayne" = "PFW",
+  "Queens" = "Queens NC",
+  "South Dakota St." = "S Dakota St",
+  "South Carolina St." = "S Carolina St",
+  "Southeast Missouri St." = "SE Missouri St",
+  "Saint Francis" = "St Francis PA",
+  "Saint Joseph's" = "St Joseph's PA",
+  "Saint Mary's" = "St Mary's CA",
+  "SIU Edwardsville" = "SIUE",
+  "Southeastern Louisiana" = "SE Louisiana",
+  "Southern Illinois" = "S Illinois",
+  "St. Thomas" = "St Thomas MN",
+  "Stephen F. Austin" = "SF Austin",
+  "Tennessee Martin" = "TN Martin",
+  "Texas A&M Corpus Chris" = "TAM C. Christi",
+  "Texas Southern" = "TX Southern",
+  "UT Rio Grande Valley" = "UTRGV",
+  "UMASS Lowell" = "MA Lowell",
+  "UMKC" = "Missouri KC",
+  "UTSA" = "UT San Antonio",
+  "Winston Salem St." = "W Salem St",
+  "Western Carolina" = "W Carolina",
+  "Western Illinois" = "W Illinois",
+  "Western Kentucky" = "WKU",
+  "Western Michigan" = "W Michigan"
+)
+
+
+# Apply manual corrections before cleaning
+all_season_stats <- all_season_stats %>%
+  mutate(team = ifelse(team %in% names(team_name_map),
+                       team_name_map[team],
+                       team))
+
+# 3. Join team IDs and names to game data
+join_teams_to_games <- function(game_data, teams_data) {
+  game_data %>%
+    left_join(
+      teams_data %>% 
+        select(TeamID, TeamName) %>% 
+        rename(WTeamName = TeamName),
+      by = c("WTeamID" = "TeamID")
+    ) %>%
+    left_join(
+      teams_data %>% 
+        select(TeamID, TeamName) %>% 
+        rename(LTeamName = TeamName),
+      by = c("LTeamID" = "TeamID")
+    )
+}
+
+game_stats <- join_teams_to_games(game_stats, teams)
+
+# 4. Function to clean names for matching
+clean_team_names <- function(name) {
+  name %>%
+    str_to_lower() %>%                           # lowercase
+    str_replace_all("[[:punct:]]", "") %>%       # remove punctuation
+    str_replace_all("\\s+", " ") %>%             # normalize spaces
+    str_trim() %>%                               # trim whitespace
+    str_replace_all("saint", "st") %>%           # standardize saint -> st
+    str_replace_all("\\bst\\b", "st")            # ensure "st" is consistent
+}
+
+# 5. Prepare for joining
+teams_clean <- teams %>%
+  mutate(TeamName_clean = clean_team_names(TeamName))
+
+all_season_stats_clean <- all_season_stats %>%
+  mutate(team_clean = clean_team_names(team))
+
+# 6. Join cleaned names to assign TeamID to all season stats
+all_season_stats <- all_season_stats_clean %>%
+  left_join(teams_clean %>% select(TeamID, TeamName_clean),
+            by = c("team_clean" = "TeamName_clean")) %>%
+  select(-team_clean)
+
+
+# Check for unmatched teams
+unmatched <- all_season_stats %>%
+  filter(is.na(TeamID)) %>%
+  distinct(team)
+
+if(nrow(unmatched) > 0) {
+  print("Unmatched teams:")
+  print(unmatched)
+}
+
+all_season_stats <- all_season_stats %>%
+  filter(!is.na(TeamID))
+
+# 2. Separate training and prediction data
+game_stats_train <- game_stats %>% filter(Season < 2025, Season > 2015)
+game_stats_2025 <- game_stats %>% filter(Season == 2025)
+
+# 3. Create long format for training games
+game_long_train <- bind_rows(
+  game_stats_train %>%
+    mutate(
+      TeamID = WTeamID,
+      OppID = LTeamID,
+      Win = 1,
+      Home = ifelse(WLoc == "H", 1, ifelse(WLoc == "A", -1, 0))
+    ) %>%
+    select(Season, DayNum, TeamID, OppID, Win, Home),
+  
+  game_stats_train %>%
+    mutate(
+      TeamID = LTeamID,
+      OppID = WTeamID,
+      Win = 0,
+      Home = ifelse(WLoc == "H", -1, ifelse(WLoc == "A", 1, 0))
+    ) %>%
+    select(Season, DayNum, TeamID, OppID, Win, Home)
+)
+
+# 4. Merge with historical season stats
+season_stats_train <- all_season_stats %>%
+  filter(year < 2025, year > 2015)
+
+game_long_train <- game_long_train %>%
+  left_join(season_stats_train, by = c("TeamID" = "TeamID", "Season" = "year"))
+
+# Remove rows with missing season stats
+game_long_train <- game_long_train %>%
+  filter(!is.na(adj_o))
+
+# 5. Standardize predictors and save scaling parameters
+scaling_params <- game_long_train %>%
+  summarise(
+    adj_o_mean = mean(adj_o, na.rm = TRUE),
+    adj_o_sd = sd(adj_o, na.rm = TRUE),
+    adj_d_mean = mean(adj_d, na.rm = TRUE),
+    adj_d_sd = sd(adj_d, na.rm = TRUE),
+    efg_mean = mean(efg, na.rm = TRUE),
+    efg_sd = sd(efg, na.rm = TRUE),
+    def_efg_mean = mean(def_efg, na.rm = TRUE),
+    def_efg_sd = sd(def_efg, na.rm = TRUE),
+    oreb_rate_mean = mean(oreb_rate, na.rm = TRUE),
+    oreb_rate_sd = sd(oreb_rate, na.rm = TRUE),
+    tov_rate_mean = mean(tov_rate, na.rm = TRUE),
+    tov_rate_sd = sd(tov_rate, na.rm = TRUE),
+    two_pt_pct_mean = mean(two_pt_pct, na.rm = TRUE),
+    two_pt_pct_sd = sd(two_pt_pct, na.rm = TRUE),
+    three_pt_pct_mean = mean(three_pt_pct, na.rm = TRUE),
+    three_pt_pct_sd = sd(three_pt_pct, na.rm = TRUE)
+  )
+
+game_long_train <- game_long_train %>%
+  mutate(
+    adj_o_z = (adj_o - scaling_params$adj_o_mean) / scaling_params$adj_o_sd,
+    adj_d_z = (adj_d - scaling_params$adj_d_mean) / scaling_params$adj_d_sd,
+    efg_z = (efg - scaling_params$efg_mean) / scaling_params$efg_sd,
+    def_efg_z = (def_efg - scaling_params$def_efg_mean) / scaling_params$def_efg_sd,
+    oreb_rate_z = (oreb_rate - scaling_params$oreb_rate_mean) / scaling_params$oreb_rate_sd,
+    tov_rate_z = (tov_rate - scaling_params$tov_rate_mean) / scaling_params$tov_rate_sd,
+    two_pt_pct_z = (two_pt_pct - scaling_params$two_pt_pct_mean) / scaling_params$two_pt_pct_sd,
+    three_pt_pct_z = (three_pt_pct - scaling_params$three_pt_pct_mean) / scaling_params$three_pt_pct_sd,
+    TeamID = factor(TeamID),
+    OppID = factor(OppID)
+  )
+
+# 6. Fit the Bayesian model
+model_formula <- bf(
+  Win ~ 1 + Home + 
+    adj_o_z + adj_d_z + efg_z + def_efg_z +
+    oreb_rate_z + tov_rate_z + 
+    two_pt_pct_z + three_pt_pct_z +
+    (1 | TeamID) + (1 | OppID),
+  family = bernoulli(link = "logit")
+)
+
+priors <- c(
+  prior(normal(0, 0.5), class = Intercept),
+  prior(normal(0, 0.5), class = b),
+  prior(exponential(1), class = sd)
+)
+
+#install_cmdstan()
+set_cmdstan_path("~/.cmdstan/cmdstan-2.36.0")
+cmdstan_path()
+options(brms.backend = "cmdstanr") # runs faster
+fit <- brm(
+  formula = model_formula,
+  data = game_long_train,
+  prior = priors,
+  chains = 4,
+  iter = 2000,
+  warmup = 1000,
+  cores = 4,
+  seed = 123
+)
+
+# Trace plots
+plot(fit)
+
+# Posterior predictive checks
+pp_check(fit)
+
+# R-hat and ESS summaries
+summary(fit)$fixed    # for fixed effects
+summary(fit)$random   # for random effects
+
+# Or view all convergence summaries
+summary(fit)
+
+
+posterior_array <- as.array(fit)
+mcmc_dens_overlay(posterior_array, pars = c("b_Home", "b_adj_o_z", "b_adj_d_z"))
+mcmc_hist(posterior_array, pars = c("b_Home", "b_adj_o_z", "b_adj_d_z"))
+
+# 7. Prepare 2025 season stats
+season_stats_2025 <- season_stats %>%
+  filter(year == 2025) %>%
+  left_join(teams, by = c("team" = "TeamName"))
+
+# Standardize 2025 stats using historical scaling parameters
+season_stats_2025 <- season_stats_2025 %>%
+  mutate(
+    adj_o_z = (adj_o - scaling_params$adj_o_mean) / scaling_params$adj_o_sd,
+    adj_d_z = (adj_d - scaling_params$adj_d_mean) / scaling_params$adj_d_sd,
+    efg_z = (efg - scaling_params$efg_mean) / scaling_params$efg_sd,
+    def_efg_z = (def_efg - scaling_params$def_efg_mean) / scaling_params$def_efg_sd,
+    oreb_rate_z = (oreb_rate - scaling_params$oreb_rate_mean) / scaling_params$oreb_rate_sd,
+    tov_rate_z = (tov_rate - scaling_params$tov_rate_mean) / scaling_params$tov_rate_sd,
+    two_pt_pct_z = (two_pt_pct - scaling_params$two_pt_pct_mean) / scaling_params$two_pt_pct_sd,
+    three_pt_pct_z = (three_pt_pct - scaling_params$three_pt_pct_mean) / scaling_params$three_pt_pct_sd
+  )
+
+# 8. Predict 2025 team strengths
+# Create prediction dataset with neutral site, average opponent
+newdata_2025 <- season_stats_2025 %>%
+  mutate(
+    Home = 0,
+    TeamID = factor(TeamID),
+    OppID = factor(NA),
+    Win = NA
+  )
+
+# Get predictions (allowing new team levels for 2025)
+pred_2025 <- predict(fit, 
+                     newdata = newdata_2025,
+                     re_formula = ~ (1 | TeamID),
+                     allow_new_levels = TRUE)
+
+team_strengths_2025 <- season_stats_2025 %>%
+  mutate(
+    strength = pred_2025[, "Estimate"], error = pred_2025[,"Est.Error"]
+  ) %>%
+  select(team, strength, error) %>%
+  arrange(desc(strength))
+
+# 9. View results
+print(head(team_strengths_2025, 30))
+
+# 10. Save outputs
+saveRDS(fit, "team_strength_model.rds")
+saveRDS(scaling_params, "scaling_params.rds")
+write.csv(team_strengths_2025, "team_strengths_2025.csv", row.names = FALSE)
+
+# Check model summary
+summary(fit)
+```
