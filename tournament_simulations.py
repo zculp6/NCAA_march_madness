@@ -168,7 +168,7 @@ past_results.drop(index=[16,17,18], inplace=True)
 tournament_df = tournament_df.merge(past_results, on="Seed", how="left")
 
 # Add a slider to choose weight for simulation
-weight = st.slider("Choose Weight for Simulation (0 = more chalky, 1 = less chalky)", min_value=0.0, max_value=1.0, value=1.0, step=0.05)
+weight = st.slider("Choose Weight for Simulation (0 = more chalky, 1 = less chalky, recommended: 0.25)", min_value=0.0, max_value=1.0, value=0.25, step=0.01)
 
 # Simulate a game
 def simulate_game(team1, team2, mean1, mean2, std1, std2, seed1_prob, seed2_prob, weight):
@@ -178,8 +178,12 @@ def simulate_game(team1, team2, mean1, mean2, std1, std2, seed1_prob, seed2_prob
     s1 = weight * r1 + (1 - weight) * seed1_prob
     s2 = weight * r2 + (1 - weight) * seed2_prob
 
-    # Convert strengths into win probabilities
-    p = np.exp(s1 - s2) / (1 + np.exp(s1 - s2))
+    # Convert probabilities to log-odds
+    log_odds1 = np.log(s1 / (1 - s1))
+    log_odds2 = np.log(s2 / (1 - s2))
+
+    # Compute win probability using logistic function on difference
+    p = 1 / (1 + np.exp(log_odds2 - log_odds1))
 
     return team1 if np.random.rand() < p else team2
 
@@ -288,23 +292,26 @@ def simulate_tournament():
 
     return round_matchups, current_round_teams[0], simulated_winner
 
-def reset_simulation():
-    if 'selected_winners' in st.session_state:
-        st.session_state.selected_winners.clear()
 
+def reset_simulation():
+    # Clear all selection state
+    if 'selected_winners' in st.session_state:
+        st.session_state.selected_winners = {}  # Use = {} instead of .clear()
+
+    # Force re-simulation by removing round_matchups
     if 'round_matchups' in st.session_state:
-        del st.session_state.round_matchups  # Remove matchups to force a new simulation
+        del st.session_state.round_matchups
 
     if 'current_round_teams' in st.session_state:
-        st.session_state.current_round_teams.clear()
+        del st.session_state.current_round_teams
 
-    if 'tournament_simulated' in st.session_state:
-        st.session_state.tournament_simulated = False
+    # Set flag to trigger simulation
+    st.session_state.tournament_simulated = True
 
-    #if 'radio_button_state' in st.session_state:
-    #    del st.session_state['radio_button_state']
-
-    st.session_state.simulation_num = 1  # Reset simulation counter
+    # Increment simulation counter for unique keys
+    if 'simulation_num' not in st.session_state:
+        st.session_state.simulation_num = 0
+    st.session_state.simulation_num += 1
 
 # Add button to show power ranking
 if st.button('Show Power Ranking'):
@@ -327,8 +334,7 @@ if st.button('Show Power Ranking'):
 # Button to simulate a new tournament
 if st.button('Simulate New Tournament'):
     reset_simulation()
-    st.session_state.simulation_num += 1
-    st.session_state.tournament_simulated = True
+    #st.rerun
 
 # Run simulation if needed
 if st.session_state.tournament_simulated or 'round_matchups' not in st.session_state:
