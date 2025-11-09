@@ -172,9 +172,16 @@ weight = st.slider("Choose Weight for Simulation (0 = more chalky, 1 = less chal
 
 # Simulate a game
 def simulate_game(team1, team2, mean1, mean2, std1, std2, seed1_prob, seed2_prob, weight):
-    team1_strength = weight * min(np.random.normal(mean1, std1),1) + (1 - weight) * seed1_prob
-    team2_strength = weight * min(np.random.normal(mean2, std2),1) + (1 - weight) * seed2_prob
-    return team1 if team1_strength > team2_strength else team2
+    r1 = np.clip(np.random.normal(mean1, std1), 0, 1)
+    r2 = np.clip(np.random.normal(mean2, std2), 0, 1)
+
+    s1 = weight * r1 + (1 - weight) * seed1_prob
+    s2 = weight * r2 + (1 - weight) * seed2_prob
+
+    # Convert strengths into win probabilities
+    p = np.exp(s1 - s2) / (1 + np.exp(s1 - s2))
+
+    return team1 if np.random.rand() < p else team2
 
 
 def simulate_first_four():
